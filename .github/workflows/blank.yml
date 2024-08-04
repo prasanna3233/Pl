@@ -1,0 +1,44 @@
+Yes, I can help you with that! Here's an updated Jenkinsfile that pushes changes to a specific branch and creates a pull request to the main branch:
+```
+pipeline {
+    agent any
+
+    stages {
+        stage('Build and Push') {
+            steps {
+                // Build and push changes to a specific branch (e.g., feature/new-feature)
+                git url: env.GIT_URL, branch: env.BRANCH_NAME
+                sh 'git config --global user.email "jenkins@example.com"'
+                sh 'git config --global user.name "Jenkins"'
+                sh 'git add .'
+                sh 'git commit -m "Automated commit from Jenkins"'
+                sh 'git push origin feature/new-feature'
+            }
+        }
+        stage('Create Pull Request') {
+            steps {
+                // Create a pull request to the main branch (e.g., main)
+                script {
+                    def github = new GithubApi(env.GITHUB_CREDENTIALS_ID)
+                    def pullRequest = github.createPullRequest(
+                        env.GITHUB_REPO_OWNER,
+                        env.GITHUB_REPO_NAME,
+                        'feature/new-feature',
+                        'main',
+                        'Automated pull request from Jenkins',
+                        'This is an automated pull request from Jenkins.'
+                    )
+                    echo "Pull Request created: ${pullRequest.htmlUrl}"
+                }
+            }
+        }
+    }
+}
+```
+In this updated Jenkinsfile:
+
+1. We added a new stage called `Create Pull Request`.
+2. We use the `GithubApi` class to create a pull request to the main branch.
+3. We pass the necessary parameters to the `createPullRequest` method, including the repository owner, repository name, source branch, target branch, title, and body.
+
+Note that you'll need to replace the placeholders with your actual GitHub credentials and repository information. Additionally, you may need to install the `GithubApi` plugin in your Jenkins instance.
