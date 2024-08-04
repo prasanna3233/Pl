@@ -1,0 +1,173 @@
+ef DEPLOY_TO
+def project_name = 'flowworks'
+def project_name_ko = '플로우웍스'
+def AWS_REGION = 'ap-northeast-2'
+def COMMITS = ''
+pipeline {
+    agent any
+    environment {
+      AWS_ACCESS_KEY_ID = 'AKIAXOUTM6DFK2DSLDVA'
+      AWS_SECRET_ACCESS_KEY = credentials('indinity_awsSecretAccessKey')
+      AWS_DEFAULT_REGION = 'ap-northeast-2'
+    }
+    stages {
+      stage('Decide Deploy To') {
+        steps {
+          script {
+            if (env.BRANCH_NAME == 'master'){
+              DEPLOY_TO = 'prod'
+            } else if (env.BRANCH_NAME == 'develop'){
+              DEPLOY_TO = 'dev'
+            } else if (env.BRANCH_NAME == 'qa'){
+              DEPLOY_TO = 'qa'
+            }
+          }
+          
+          echo "DEPLOY_TO: ${DEPLOY_TO}"
+        }
+      }
+      stage('Pull git repository and check updates') {
+        steps {
+          echo 'Cloning Repository'
+          git url: env.GIT_URL,
+              branch: env.BRANCH_NAME,
+              credentialsId: 'gitcredential'
+          script {
+            BATCH_JOBS_UPDATED=false
+            DICLE_LANDING_PAGE_UPDATED=false
+            ZAND_LANDING_PAGE_UPDATED=false
+            FLOWWORKS_SERVER_UPDATED=false
+            FLOWWORKS_USER_WEBSITE_UPDATED=false
+            FLOWWORKS_ADMIN_WEBSITE_UPDATED=false
+            NCLOUD_SERVER_UPDATED=false
+            if(env.GIT_PREVIOUS_SUCCESSFUL_COMMIT == null){
+              return
+            }
+            COMMITS = sh(encoding: 'UTF-8',returnStdout: true,script:"git --no-pager log --abbrev-commit --decorate=short --pretty=oneline ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} 2> /dev/null || echo ''")
+            BATCH_JOBS_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c memvers/batch_jobs) || true").trim()
+            if(BATCH_JOBS_UPDATED_CNT.toInteger() > 0){
+              BATCH_JOBS_UPDATED = true
+            }
+            
+            DICLE_LANDING_PAGE_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c dicle/landing_website) || true").trim()
+            if(DICLE_LANDING_PAGE_UPDATED_CNT.toInteger() > 0){
+              DICLE_LANDING_PAGE_UPDATED = true
+            }
+            
+            ZAND_LANDING_PAGE_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c zand/landing_website) || true").trim()
+            if(ZAND_LANDING_PAGE_UPDATED_CNT.toInteger() > 0){
+              ZAND_LANDING_PAGE_UPDATED = true
+            }
+            
+            FLOWWORKS_SERVER_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c flowworks/server) || true").trim()
+            if(FLOWWORKS_SERVER_UPDATED_CNT.toInteger() > 0){
+              FLOWWORKS_SERVER_UPDATED = true
+            }
+            
+            FLOWWORKS_USER_WEBSITE_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c flowworks/user_website) || true").trim()
+            if(FLOWWORKS_USER_WEBSITE_UPDATED_CNT.toInteger() > 0){
+              FLOWWORKS_USER_WEBSITE_UPDATED = true
+            }
+            
+            FLOWWORKS_ADMIN_WEBSITE_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c flowworks/admin_website) || true").trim()
+            if(FLOWWORKS_ADMIN_WEBSITE_UPDATED_CNT.toInteger() > 0){
+              FLOWWORKS_ADMIN_WEBSITE_UPDATED = true
+            }
+            
+            NCLOUD_SERVER_UPDATED_CNT = sh(encoding: 'UTF-8',returnStdout: true,script:"(git diff --exit-code ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${env.BRANCH_NAME} | grep -c ncloudserver) || true").trim()
+            if(NCLOUD_SERVER_UPDATED_CNT.toInteger() > 0){
+              NCLOUD_SERVER_UPDATED = true
+            }
+          }
+        }
+        post {
+            success {
+              script {
+                if (COMMITS == '') {
+                    slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[$project_name_ko $branch_name]\n업데이트 내역 없음")
+                } else {
+                    slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[$project_name_ko $branch_name]\n업데이트 내역\n$COMMITS")
+                }
+              }
+            }
+            failure {
+              slackSend(color: "warning", channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}] 레포지토리 다운로드 실패.")
+              error '레포지토리 다운로드 실패했습니다.'
+            }
+        }
+      }
+      stage('Deploy ZAND_LANDING_PAGE') {
+        when {
+          expression {
+            return ZAND_LANDING_PAGE_UPDATED;
+          }
+        }
+        steps {
+          script {
+            slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][ZAND_LANDING_PAGE] 배포중...")
+            if (env.BRANCH_NAME == 'master') {
+              sh """
+                ./scripts/deploy_zand_website.sh prod
+              """
+            }
+          }
+        }
+        post {
+          success {
+            slackSend(color: "good", channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][ZAND_LANDING_PAGE] 배포 완료.")
+          }
+          failure {
+            slackSend(color: "warning", channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][ZAND_LANDING_PAGE] 배포 실패.")
+            error '[ZAND_LANDING_PAGE] 배포에 실패했습니다.'
+          }
+        }
+      }
+      stage('BUILD FLOWWORKS_SERVER') {
+        agent {
+          label (DEPLOY_TO == 'prod' ? 'master' : 'ubuntu-slave')
+        }
+        when {
+          expression {
+            return FLOWWORKS_SERVER_UPDATED && env.BRANCH_NAME == 'master';
+          }
+        }
+        steps {
+          script {
+            slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][FLOWWORKS_SERVER] 빌드중...")
+            if (env.BRANCH_NAME == 'master') {
+              sh """
+                ./scripts/build_server_ecs.sh $DEPLOY_TO
+              """
+            }
+          }
+        }
+        post {
+          success {
+            stash name: 'flowworks_server_build', includes: '**/flowworks_server/**'
+            slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][FLOWWORKS_SERVER] 빌드 완료.")
+          }
+          failure {
+            slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][FLOWWORKS_SERVER] 빌드 실패.")
+            error '[FLOWWORKS_SERVER] 빌드에 실패했습니다.'
+          }
+        }
+      }
+      
+      stage('BUILD FLOWWORKS_USER_WEBSITE') {
+        agent {
+          label (DEPLOY_TO == 'prod' ? 'master' : 'ubuntu-slave')
+        }
+        when {
+          expression {
+            return FLOWWORKS_USER_WEBSITE_UPDATED && env.BRANCH_NAME == 'master';
+          }
+        }
+        steps {
+          script {
+            slackSend(channel: "배포", teamDomain: "indinity", tokenCredentialId: "indinity_slack_token", message: "[${env.BRANCH_NAME}][FLOWWORKS_USER_WEBSITE] 빌드중...")
+            if (env.BRANCH_NAME == 'master') {
+              sh """
+                ./scripts/build_website_ecs.sh $DEPLOY_TO
+              """
+            }
+         
